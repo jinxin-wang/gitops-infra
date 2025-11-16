@@ -1,127 +1,130 @@
-# 高性能混合云 CI/CD 架构设计方案
+# **高性能纯云 CI/CD 架构设计方案 (动态环境优化版)**
 
-## 1. 架构总览
+## **1\. 架构总览**
 
-本方案旨在设计一套端到端的 CI/CD 流程，以应对高频提交 (High Commit Frequency) 和混合云部署 (Hybrid Cloud) 的挑战。架构以 Kubernetes 为核心，采用 IaC (Terraform) 管理基础设施，GitOps (ArgoCD) 管理应用部署，并通过 BuildKite + Tekton 的组合实现高效、安全的 CI 流程。
+本方案旨在设计一套端到端的**纯云原生 CI/CD 流程**，以应对**高频提交 (High Commit Frequency)** 和**云资源紧张**的挑战。架构以 Kubernetes 为核心，采用 IaC (Terraform) 管理云基础设施，GitOps (ArgoCD) 管理应用部署，并通过 BuildKite \+ Tekton \+ Bazel 的组合实现最高效、最节省资源的 CI 流程。
 
-- CI (持续集成): 运行在本地数据中心 (On-Prem)，确保源代码和构建过程的安全性。
-- CD (持续交付): 跨越本地 (Testbed) 和云端 (Staging, Production)，通过 GitOps 实现自动化和一致性部署。
-- CO (持续运维): 确保应用能够可靠、安全、高效地运行，并具备自我修复能力。
-- CF (持续反馈): 负责将CO阶段收集到的数据转化为行动，也就是说用户体验数据、性能指标、错误日志、安全漏洞等，都会被收集起来。这些数据被分析后，形成新的需求或改进方案，重新投入到 CI 阶段，从而推动产品迭代和质量提升。
-## 2. 核心设计理念
+* **CI (持续集成):** 运行在**云端 K8s (CI 集群)**，利用 Spot/竞价实例 降低成本。  
+* **CD (持续交付):** 跨越云端的动态环境 (Testbed) 和可休眠环境 (Staging)，最终部署到 Production。  
+* **CO (持续运维):** 确保应用能够可靠、安全、高效地运行，并具备自我修复能力。
+* **CF (持续反馈):** 负责将CO阶段收集到的数据转化为行动，也就是说用户体验数据、性能指标、错误日志、安全漏洞等，都会被收集起来。这些数据被分析后，形成新的需求或改进方案，重新投入到 CI 阶段，从而推动产品迭代和质量提升。
 
-1. 基础设施即代码 (IaC): 所有基础设施（K8s 集群、VPC、Harbor/Nexus 实例）均由 Terraform 声明式管理，确保环境的可重复性和一致性。
+* **核心优化 (资源节省):**  
+  1. **动态 PR 环境 (Ephemeral Environments):** CI 流程为每个 PR 动态创建*最小化*的测试命名空间。  
+  2. **动态 Testbed 环境:** CI 流程为合并到 main 分支的 Commit 动态创建*完整*的测试环境，测试后**立即销毁**。  
+  3. **Staging 环境休眠 (Hibernation):** Staging 环境的应用默认 replicas: 0，仅在 UAT 或性能测试时按需唤醒。
 
-2. GitOps 持续交付: ArgoCD 作为唯一的部署引擎，以 GitOps 配置仓库作为部署的单一事实来源 (SSOT)，实现声明式、自动化的应用交付。
+## **2\. 核心设计理念**
 
-3. 混合云模式 (Hybrid Cloud):
- - CI/Testbed 在本地 (On-Prem): 源代码的编译、测试和打包在本地数据中心完成，代码不离开内网，保障安全。
- - Staging/Prod 在云端 (Cloud): 利用云服务商（如腾讯云 TKE、阿里云 ACK）的弹性和高可用性。
- 
-4. 编排与执行分离:
- - BuildKite (编排器): 作为 SaaS 控制平面，负责 CI/CD 流程的编排、调度、UI 展示和人工审批。Agent 部署在本地，确保安全。
- - Tekton (执行引擎): 作为 K8s 原生 CI 引擎，在本地 K8s 集群中动态创建 Pod 执行所有 CI 任务（Lint, Test, Build）。
- 
-5. 高效增量构建 (CI 效率):
- - BuildKite 动态流水线: 在 CI 启动时首先分析 git diff，动态生成最小化的Tekton 流水线，只运行受变更影响的任务。
- - Bazel 智能缓存: 作为构建工具，利用其强大的远程缓存和增量构建能力，跳过所有未发生变化的代码模块的编译。
+1. **基础设施即代码 (IaC):** 所有云基础设施（K8s 集群、VPC、PaaS 制品库）均由 **Terraform** 声明式管理。  
+2. **GitOps 持续交付:** **ArgoCD** 作为唯一的部署引擎，以 GitOps 配置仓库作为部署的单一事实来源 (SSOT)。  
+3. **统一云环境:** 所有环境（CI, Testbed, Staging, Prod）均在云服务商（如腾讯云 TKE、阿里云 ACK）上运行。  
+4. **编排与执行分离:** **BuildKite** 作为 SaaS 控制平面负责编排和审批，**Tekton** 在 K8s 上作为原生执行引擎。  
+5. **极致的 CI 效率 (CI 效率 \+ 成本优化):**  
+   * **BuildKite 动态流水线:** 在 CI 启动时分析 git diff，**动态生成**最小化的 Tekton 流水线，只运行受影响的任务。  
+   * **Bazel 智能缓存:** 利用强大的远程缓存和增量构建能力，**跳过**所有未发生变化的代码模块的编译。  
+   * **Spot/竞价实例:** CI 执行集群（Tekton Pods）将优先调度在 Spot 实例节点上，大幅降低计算成本。  
+6. **统一集群管理:** **Rancher** 作为统一的管理平台，导入并管理所有云端 K8s 集群，提供单一视图 (Single Pane of Glass) 进行运维和 RBAC 管理。  
+7. **统一制品库:**  
+   * **Nexus OSS:** 部署在云端 K8s (CI 集群)，作为语言依赖包 (PyPI, npm, Go Mod) 的私有仓库和公网缓存。  
+   * **Harbor (单一实例):** 部署在云端 K8s (CI 集群)，作为所有环境的唯一容器镜像和 Helm Chart 仓库。
 
-6. 统一集群管理: Rancher 作为统一的管理平台，导入并管理本地和云端的 K8s 集群，提供单一视图 (Single Pane of Glass) 进行运维和 RBAC 管理。
+## **3\. 环境与部署策略 (纯云架构)**
 
-7. 专业化制品库:
- - Nexus OSS: 部署在本地，作为 Python (PyPI)、Go Mod、JavaScript (npm) 等语言依赖包的私有仓库和公网缓存。
- - Harbor: 部署两套实例，作为容器镜像和 Helm Chart仓库，并通过复制规则连接本地与云端。
- 
-## 3. 环境与部署策略
+| 环境 | 位置 | K8s 集群 | 核心服务 (CI/CD) | 应用部署 |
+| :---- | :---- | :---- | :---- | :---- |
+| **本地开发** | 开发者本地 | N/A (Docker Desktop) | N/A | 本地应用 |
+| **CI / 平台服务** | **云端 (Cloud)** | **K8s 集群 (CI-Mgmt)** | **Rancher, BuildKite Agents, Tekton, Bazel 缓存, Nexus, SonarQube, Harbor, ArgoCD** | N/A |
+| **动态 PR 环境** | **云端 (Cloud)** | **K8s 集群 (CI-Mgmt)** | (由 ArgoCD 动态创建) | **临时的、最小化的微服务**（测试后销毁） |
+| **动态 Testbed** | **云端 (Cloud)** | **K8s 集群 (CI-Mgmt)** | (由 ArgoCD 动态创建) | **临时的、完整的微服务**（测试后销毁） |
+| **Staging** | **云端 (Cloud)** | **K8s 集群 (Staging)** | N/A | **可休眠 (Hibernating)** 的应用 (默认 replicas: 0\) |
+| **Production** | **云端 (Cloud)** | **K8s 集群 (Production)** | N/A | Production 环境应用 |
 
-|环境|位置|K8s集群|核心服务(CI/CD)|应用部署|
-|---|---|---|---|---|
-|本地开发|开发者本地|N/A (Docker Desktop)|N/A|本地应用|
-|CI / Testbed|本地数据中心 (On-Prem)|K8s 集群 (On-Prem)|Rancher, BuildKite Agents, Tekton, Bazel 缓存, Nexus, SonarQube, Harbor-OnPrem, ArgoCD-OnPrem|Testbed 环境应用|
-|Staging|云端 (Cloud)|K8s 集群 (Cloud)|Harbor-Cloud, ArgoCD-Cloud|Staging 环境应用|
-|Production|云端 (Cloud)|K8s 集群 (Cloud)|Harbor-Cloud, ArgoCD-Cloud|Production 环境应用|
+## **4\. 组件与角色分工 (纯云架构)**
 
+| 工具 | 角色 | 部署位置/运行方式 | 核心职责 |
+| :---- | :---- | :---- | :---- |
+| **GitLab/GitHub** | SCM (代码仓库) | SaaS | 存储应用代码和 GitOps 配置；发送 Webhook。 |
+| **Terraform** | IaC (基础设施) | 命令行工具 | 创建**所有云上 K8s 集群**、VPC、数据库、PaaS 服务等。 |
+| **Rancher** | K8s 管理平台 | K8s Deployment (CI-Mgmt 集群) | 统一导入和管理所有 K8s 集群，提供 UI、RBAC 和应用商店。 |
+| **BuildKite** | **CI/CD 编排器** | 控制平面 (SaaS) \+ Agent (CI-Mgmt K8s) | **总指挥。** 接收 Webhook，调度 Agent，管理动态流水线和人工审批。 |
+| **Tekton** | **CI 执行引擎** | K8s 原生 (CI-Mgmt K8s) | **执行者。** 在 K8s 中创建 Pods (优先使用 Spot 节点) 运行 CI 任务。 |
+| **Bazel** | 高效构建系统 | 命令行工具 (在 Tekton Pod 中运行) | **编译/构建。** 高效编译代码，利用缓存跳过重复构建。 |
+| **Nexus OSS** | 语言依赖包仓库 | K8s Deployment (CI-Mgmt 集群) | 存储/代理 PyPI, npm, Go Mod 等。 |
+| **Harbor** | **容器镜像仓库 (单一实例)** | K8s Deployment (CI-Mgmt K8s) | 存储 Docker/OCI 镜像，漏洞扫描 (Trivy)，供所有环境使用。 |
+| **SonarQube** | 静态代码分析 | K8s Deployment (CI-Mgmt K8s) | **质量关卡 (Quality Gate)。** 分析代码质量、安全漏洞、技术债务。 |
+| **Kaniko/Buildah** | 容器镜像打包 | 命令行工具 (在 Tekton Pod 中运行) | 在 K8s Pod 中安全地（无 Daemon）将 Bazel 的编译结果打包成镜像。 |
+| **ArgoCD** | **CD/GitOps 引擎** | K8s Deployment (CI-Mgmt K8s) | **部署者。** 监控 GitOps 仓库，自动同步应用到所有 K8s 环境。 |
 
-## 4. 组件与角色分工
+## **5\. 详细流程分解**
 
-|工具|角色|部署位置/运行方式|核心职责|
-|---|---|---|---|
-|GitLab/GitHub|SCM (代码仓库)|本地 (On-Prem) 或 SaaS|存储应用代码和 GitOps 配置；发送 Webhook。|
-|Terraform|IaC (基础设施)|命令行工具 (由 BuildKite 调用或本地执行)|创建 K8s 集群 (On-Prem & Cloud)、VPC、数据库、Harbor、Nexus 等。|
-|Rancher|K8s 管理平台|K8s Deployment (任一集群)|统一导入和管理所有 K8s 集群，提供 UI、RBAC 和应用商店。|
-|BuildKite|CI/CD 编排器|控制平面 (SaaS) + Agent (On-Prem K8s)|总指挥。 接收 Webhook，调度 Agent，管理动态流水线和人工审批。|
-|Tekton|CI 执行引擎|K8s 原生 (On-Prem)|执行者。 被 BuildKite 触发，在 K8s 中创建 Pods 运行 CI 任务。|
-|Bazel|高效构建系统|命令行工具 (在 Tekton Pod 中运行)|编译/构建。 高效编译代码，利用缓存跳过重复构建。|
-|Nexus OSS|语言依赖包仓库|K8s Deployment (On-Prem)|存储/代理 PyPI, npm, Go Mod 等。|
-|Harbor|容器镜像仓库|k8s Deployment (On-Prem & Cloud)|存储 Docker/OCI 镜像，漏洞扫描 (Trivy)，负责本地到云端的镜像复制。|
-|SonarQube|静态代码分析|K8s Deployment (On-Prem)|质量关卡 (Quality Gate)。 分析代码质量、安全漏洞、技术债务。|
-|Kaniko/Buildah|容器镜像打包|命令行工具 (在 Tekton Pod 中运行)|在 K8s Pod 中安全地（无 Daemon）将 Bazel 的编译结果打包成镜像。
-|ArgoCD|CD/GitOps 引擎|K8s Deployment (On-Prem & Cloud)|部署者。 监控 GitOps 仓库，自动同步应用到所有 K8s 环境。|
+### **阶段 0: 基础设施供应与平台搭建 (Terraform & Rancher)**
 
-## 5. 详细流程分解
+1. **执行 IaC (Terraform):** 运维团队通过 Terraform 脚本在云端创建 3 个 K8s 集群：k8s-ci-mgmt, k8s-staging, k8s-prod。  
+   * k8s-ci-mgmt 集群应配置**节点自动伸缩 (Cluster Autoscaler)**，并包含一个**Spot/竞价实例节点池**，专门用于 CI 任务。  
+2. **部署 Rancher & 导入集群:**  
+   * Terraform 部署 **Rancher** 到 k8s-ci-mgmt 集群。  
+   * Terraform 配置 Rancher 自动**导入**所有 3 个 K8s 集群。  
+3. **部署平台服务 (Rancher App Catalog):**  
+   * 运维团队通过 Rancher 应用商店，将所有 CI/CD 核心服务（**Harbor, Nexus, ArgoCD, SonarQube, Tekton, BuildKite Agents**）部署到 k8s-ci-mgmt 集群中。  
+4. **统一运维 (Rancher):** Rancher 作为统一管理入口，监控所有环境的健康状况、管理 CI/CD 服务的生命周期。
 
-### 阶段 0: 基础设施供应与平台搭建 (Terraform & Rancher)
+### **阶段 1: 持续集成 (CI) — 资源优化的动态流程 (Cloud)**
 
-1. 执行 IaC (Terraform): 运维团队通过 Terraform 脚本在本地 (On-Prem) 和云端 (Cloud) 创建所有 K8s 集群（例如 TKE, ACK）。
+1. **触发 (Git** $\\to$ **BuildKite):** 开发者**创建 Pull Request (PR)** 或 git push。GitLab/GitHub 发送 **Webhook** 通知给 **BuildKite (SaaS)**。  
+2. **动态流水线 (BuildKite):**  
+   * BuildKite 调度一个**轻量级 Bootstrap Agent (CI-Mgmt K8s)**。  
+   * Agent 运行 git diff 或 bazel query 分析变更。  
+   * Agent **动态生成**一个*最小化*的 Tekton 流水线 YAML，并 buildkite-agent pipeline upload。  
+3. **执行 CI (BuildKite** $\\to$ **Tekton):** BuildKite 调度 **Tekton** 来执行这个动态生成的流水线，Tekton Pods 将被调度到**Spot 实例节点**上。  
+4. **Tekton 运行质量门 (CI-Mgmt K8s Pods):**  
+   * **Task 1: 静态检测 (Lint & SAST):** 运行 sonar-scanner，连接到 **SonarQube**。等待**质量关卡 (Quality Gate)** 返回 "PASS"。**失败则 Pipeline 停止。**  
+   * **Task 2: 单元测试 (Unit Tests):** 运行 pytest, go test 等。测试脚本从 **Nexus** 拉取依赖包。**失败则 Pipeline 停止。**  
+5. **高效构建与推送 (Tekton** $\\to$ **Bazel** $\\to$ **Kaniko** $\\to$ **Harbor):**  
+   * **Task 3: 构建与打包:**  
+     * **a) 编译 (Bazel):** Pod 内运行 **Bazel**，利用远程缓存，仅编译发生变更的代码。  
+     * **b) 打包 (Kaniko):** Pod 内运行 **Kaniko**，构建新的 Docker 镜像 (例如 myapp:pr-123-commitSHA)。  
+     * **c) 推送 (Harbor):** Kaniko 将新镜像推送到 **Harbor** 仓库。Harbor 自动触发漏洞扫描。
 
-2. 部署 Rancher & 导入集群:
+### **阶段 2: 动态测试 (CD-PR) — 节省资源的微服务测试**
 
- - Terraform (或 Helm) 部署 Rancher 管理平台（可部署在任一集群，如 On-Prem）。
- - Terraform 配置 Rancher 自动导入 (Import) 所有由 Terraform 创建的 K8s 集群 (On-Prem, Staging, Production)。
+**此阶段仅在 Pull Request (PR) 流程中触发。**
 
-3. 部署平台服务 (Rancher App Catalog):
- - Rancher 提供统一的应用商店 (App Catalog)。运维团队通过 Rancher UI，使用 Helm Chart 将 CI/CD 核心服务部署到正确的集群：
-   - On-Prem 集群: 部署 Harbor-OnPrem, Nexus OSS, ArgoCD-OnPrem, SonarQube, Tekton, BuildKite Agents。
-   - Cloud 集群: 部署 Harbor-Cloud, ArgoCD-Cloud。
+6. **创建动态环境 (ArgoCD):**  
+   * CI 流程的最后一个 Tekton 任务，**更新 GitOps 配置仓库**中的一个**特定 PR 目录**（例如 environments/pr/pr-123.yaml）。  
+   * 这个 YAML 文件**只包含被修改的微服务**及其**核心依赖**（例如数据库）的 K8s 配置。  
+   * **ArgoCD**（使用 ApplicationSet 功能）检测到这个新文件，自动在 k8s-ci-mgmt 集群中创建一个**新的、临时的命名空间** (例如 pr-123)。  
+7. **部署动态环境 (ArgoCD):**  
+   * ArgoCD 从 **Harbor** 拉取 myapp:pr-123-commitSHA 镜像，并将其部署到 pr-123 命名空间。  
+8. **运行 E2E 测试:**  
+   * Tekton 启动一个 E2E 测试 Pod，**只针对 pr-123.svc.cluster.local 这个临时环境**运行集成和 E2E 测试。  
+9. **销毁环境:**  
+   * 当 PR 被合并或关闭时，CI 流程会自动删除 GitOps 仓库中的 environments/pr/pr-123.yaml 文件。  
+   * **ArgoCD** 检测到变更，自动**销毁 pr-123 命名空间**及其所有资源，**实现资源回收**。
 
-4. 统一运维 (Rancher):
- - 此时，所有基础设施和服务均已部署。
- - Rancher 作为统一管理入口，为运维团队提供了单一视图 (Single Pane of Glass) 来监控所有环境的健康状况、管理 CI/CD 服务的生命周期（升级、回滚）以及配置跨集群的 RBAC 权限。
+### **阶段 3: 持续交付 (CD-Merge & Promotion) — 动态与休眠**
 
-### 阶段 1: 持续集成 (CI) — 从 Commit 到 本地 Harbor (On-Prem)
+**此阶段在代码合并到 main 或 release 分支时触发。**
 
-1. 触发 (Git $\to$ BuildKite): 开发者 git push 到 GitLab。GitLab 发送 Webhook 通知给 BuildKite (SaaS)。
-
-2. 动态流水线 (BuildKite):
- - BuildKite 调度一个轻量级 Bootstrap Agent (On-Prem K8s)。
- - Agent 运行 git diff 或 bazel query 分析变更。
- - Agent 动态生成一个最小化的 Tekton 流水线 YAML，并 buildkite-agent pipeline upload 回 BuildKite。
-
-3. 执行 CI (BuildKite $\to$ Tekton): BuildKite 调度 Tekton (On-Prem) 来执行这个动态生成的流水线。
-
-4. Tekton 运行质量门 (On-Prem Pods):
- - Task 1: 静态检测 (Lint & SAST): Tekton 创建 Pod 运行 golangci-lint, pylint 等。同时运行 sonar-scanner，连接到 SonarQube (On-Prem)。Tekton 轮询 API 等待质量关卡 (Quality Gate) 返回 "PASS"。失败则 Pipeline 停止。
- - Task 2: 单元测试 (Unit Tests): Tekton 创建 Pod 运行 pytest, go test 等。测试脚本从 Nexus (On-Prem) 拉取依赖包。失败则 Pipeline 停止。
-
-5. 高效构建与推送 (Tekton $\to$ Bazel $\to$ Kaniko $\to$ Harbor):
- - Task 3: 构建与打包:
-   - a) 编译 (Bazel): Pod 内运行 Bazel。Bazel 利用远程缓存，仅编译发生变更的代码，生成二进制文件。
-   - b) 打包 (Kaniko): Pod 内运行 Kaniko，读取 Dockerfile 和 Bazel 的编译结果，安全地（无 Daemon）构建出一个新的 Docker 镜像 (例如 myapp:v1.2.3-commitSHA)。
-   - c) 推送 (Harbor-OnPrem): Kaniko 将新镜像推送到 Harbor-OnPrem。Harbor 自动触发漏洞扫描。
-
-### 阶段 2: 持续交付 (CD) — 从 Testbed 到 Production (Hybrid)
-
-6. CI/CD 交接 (GitOps 更新): 最后一个 Tekton 任务 git clone GitOps 配置仓库，将 testbed/ 路径下的 YAML 镜像标签更新为 myapp:v1.2.3-commitSHA，然后 git push。
-
-7. 部署 Testbed (ArgoCD On-Prem):
- - ArgoCD-OnPrem 检测到 GitOps 仓库 testbed/ 目录的变更。
- - ArgoCD 自动同步，从 Harbor-OnPrem 拉取新镜像，并将其部署到 Testbed 环境 (On-Prem K8s)。
-
-8. 晋升 Staging (人工审批 + 混合云桥梁):
- - (在 Testbed 自动运行 E2E 测试...)
- - 测试通过后，BuildKite 流水线暂停，等待 QA 负责人点击 "Approve" 按钮。
- - 审批通过后，BuildKite 触发两个动作：
-   - 1. Harbor 复制: 触发 Harbor-OnPrem 将 myapp:v1.2.3-commitSHA 镜像复制 (Replicate) 到 Harbor-Cloud。GitOps 更新: 更新 
-   - 2. GitOps 仓库中的 staging/ 目录，指向该镜像标签。
-
-9. 部署 Staging (ArgoCD Cloud):
- - ArgoCD-Cloud 检测到 staging/ 目录的变更。
- - ArgoCD 自动同步，从 Harbor-Cloud 拉取新镜像，并将其部署到 Staging 集群 (Cloud K8s)。
-
-10. 晋升 Production (人工审批):
- - (在 Staging 环境进行 UAT 和性能测试...)
- - 发布经理在预定的发布窗口，批准 GitOps 仓库中从 staging/ 到 production/ 的 PR。
- - ArgoCD-Cloud 检测到 production/ 目录的变更，执行同步，完成生产环境的蓝绿/金丝雀部署。
+10. **动态集成测试 (代替 Testbed):**  
+    * CI 流程 (BuildKite $\\to$ Tekton) 被触发。  
+    * 类似于**阶段 2**，它**动态创建**一个**完整的**集成测试环境（例如 命名空间 testbed-main-commitSHA）。  
+    * 在此环境运行**完整的自动化回归测试**。  
+    * **关键：** 测试完成后，**ArgoCD 自动销毁这个 Testbed 命名空间**。  
+11. **晋升 Staging (人工审批 \+ 唤醒):**  
+    * 在动态 Testbed 测试通过后，BuildKite 流水线暂停，等待 QA 负责人点击 **"Approve"** 按钮（表示可以进行 UAT）。  
+    * 审批通过后，BuildKite 更新 GitOps 仓库中的 staging/ 目录：  
+      * 将镜像标签更新为 main 分支的最新镜像。  
+      * **将 replicas 从 0 修改为 N (例如 3)，以唤醒 Staging 环境。**  
+12. **部署 Staging (ArgoCD):**  
+    * **ArgoCD** 检测到 staging/ 目录的变更。  
+    * ArgoCD 从 **Harbor** 拉取新镜像，并将其部署到 **k8s-staging** 集群（此时应用从 0 扩展到 N 个实例）。  
+    * （在此环境进行 UAT 和性能测试...）  
+13. **休眠 Staging (可选):**  
+    * UAT 完成后，可以通过一个手动的 GitOps PR 或自动化的 BuildKite 任务，将 staging/ 目录的 replicas **修改回 0**，使环境休眠，节省资源。  
+14. **晋升 Production (人工审批):**  
+    * 发布经理批准 GitOps 仓库中到 production/ 的 PR。  
+    * **ArgoCD** 检测到 production/ 目录的变更，执行同步，完成生产环境的蓝绿/金丝雀部署到 **k8s-prod** 集群。
 
 
 ## 6. CI 效率策略： (应对大量Commit)
@@ -429,4 +432,14 @@ gitops-repo/
 - **数据脱敏工具**：生产数据同步到测试环境前脱敏
 - **测试数据即代码**：Git 管理种子数据
 
+
+## 14. 配置文件与文件组织结构
+
+### 14.1. 清晰的三层架构
+
+基础设施层 (terraform/)
+    ↓
+平台服务层 (kubernetes/ + configs/)
+    ↓
+应用交付层 (gitops/ + ci/)
 
