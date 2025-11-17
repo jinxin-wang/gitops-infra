@@ -1,0 +1,44 @@
+---
+# ============================================================
+# GitOps Infrastructure - Global Configuration
+# ============================================================
+
+# ArgoCD 安装方式选择
+# - 'manifest': 使用官方 kubectl manifest（推荐，稳定性好）
+# - 'helm': 使用 Helm Chart（某些环境可能有兼容性问题）
+argocd_install_method: "manifest"
+
+# 如果您遇到 ArgoCD Pod 崩溃（exec format error），请使用 manifest 方式
+# 如果需要更好的版本管理和配置管理，可以尝试 helm 方式
+
+# ============================================================
+# 服务端口配置
+# ============================================================
+harbor_http_nodeport: 30002
+argocd_http_nodeport: 30003
+argocd_https_nodeport: 30443
+
+# ============================================================
+# 版本配置
+# ============================================================
+harbor_chart_version: "1.13.1"
+argocd_chart_version: "5.51.6"  # 仅在 helm 方式时使用
+cert_manager_chart_version: "v1.13.3"
+
+# ArgoCD Manifest URL（仅在 manifest 方式时使用）
+argocd_manifest_url: "https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
+
+# ============================================================
+# 命名空间配置
+# ============================================================
+platform_namespace: platform
+argocd_namespace: argocd
+
+# ============================================================
+# Harbor 配置
+# ============================================================
+harbor_admin_password: "Harbor12345"
+harbor_registry_size: "10Gi"
+harbor_database_size: "2Gi"
+harbor_redis_size: "1Gi"
+harbor_trivy_size: "5Gi"

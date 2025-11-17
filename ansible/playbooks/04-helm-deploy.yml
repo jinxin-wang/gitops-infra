@@ -7,16 +7,8 @@
   
   vars:
     kubeconfig_path: /etc/rancher/k3s/k3s.yaml
-    platform_namespace: platform
-    
-    # Helm chart versions (可根据需要调整版本)
-    harbor_chart_version: "1.13.1"
-    argocd_chart_version: "5.51.6"
-    cert_manager_chart_version: "v1.13.3"
-    
-    # 服务端口配置
-    harbor_http_nodeport: 30002
-    argocd_http_nodeport: 30003
+    # 注意: 其他配置变量已移至 group_vars/all.yml
+    # 可以在那里统一修改 ArgoCD 安装方式和其他配置
 
   tasks:
     # ============================================================
@@ -51,6 +43,8 @@
       register: cert_manager_check
       failed_when: false
       changed_when: false
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
     
     - name: Add Jetstack Helm repository for Cert-Manager
       command: helm repo add jetstack https://charts.jetstack.io
@@ -58,11 +52,15 @@
       register: jetstack_repo
       changed_when: "'has been added' in jetstack_repo.stdout"
       failed_when: false
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
     
     - name: Update Helm repositories
       command: helm repo update
       when: cert_manager_check.rc != 0
       changed_when: true
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
     
     - name: Deploy Cert-Manager with Helm
       command: >
@@ -76,6 +74,8 @@
       when: cert_manager_check.rc != 0
       register: cert_manager_deploy
       changed_when: cert_manager_deploy.rc == 0
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
     
     - name: Wait for Cert-Manager pods to be ready
       command: >
@@ -95,6 +95,8 @@
       register: harbor_check
       failed_when: false
       changed_when: false
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
     
     - name: Deploy Harbor with Helm (using default values)
       command: >
@@ -117,6 +119,8 @@
       when: harbor_check.rc != 0
       register: harbor_deploy
       changed_when: harbor_deploy.rc == 0
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
     
     - name: Wait for Harbor core pod to be ready
       command: >
@@ -151,57 +155,123 @@
     # ============================================================
     # 部署 ArgoCD (GitOps 引擎)
     # ============================================================
-    - name: Check if ArgoCD is already installed
-      shell: helm list -n {{ platform_namespace }} | grep argocd
-      register: argocd_check
+    - name: Check if ArgoCD namespace exists
+      command: k3s kubectl get namespace {{ argocd_namespace }}
+      register: argocd_ns_check
       failed_when: false
       changed_when: false
     
+    - name: Check if ArgoCD is already installed (any method)
+      command: k3s kubectl get deployment argocd-server -n {{ argocd_namespace }}
+      register: argocd_check
+      failed_when: false
+      changed_when: false
+      when: argocd_ns_check.rc == 0
+    
+    # === 方法 1: 使用官方 Manifest 安装（推荐）===
+    - name: Create ArgoCD namespace
+      command: k3s kubectl create namespace {{ argocd_namespace }}
+      when: 
+        - argocd_install_method == "manifest"
+        - argocd_ns_check.rc != 0
+      changed_when: true
+    
+    - name: Deploy ArgoCD using official manifest
+      command: >
+        k3s kubectl apply -n {{ argocd_namespace }}
+        -f {{ argocd_manifest_url }}
+      when:
+        - argocd_install_method == "manifest"
+        - argocd_check.rc != 0 or argocd_ns_check.rc != 0
+      register: argocd_manifest_deploy
+      changed_when: "'created' in argocd_manifest_deploy.stdout or 'configured' in argocd_manifest_deploy.stdout"
+    
+    - name: Wait for ArgoCD server deployment to be available
+      command: >
+        k3s kubectl wait --for=condition=available deployment/argocd-server
+        -n {{ argocd_namespace }}
+        --timeout=300s
+      when:
+        - argocd_install_method == "manifest"
+        - argocd_check.rc != 0 or argocd_ns_check.rc != 0
+      register: argocd_wait_manifest
+      changed_when: false
+    
+    - name: Patch ArgoCD server service to NodePort
+      command: >
+        k3s kubectl patch svc argocd-server -n {{ argocd_namespace }} -p
+        '{"spec":{"type":"NodePort","ports":[{"port":80,"nodePort":{{ argocd_http_nodeport }},"name":"http"},{"port":443,"nodePort":{{ argocd_https_nodeport }},"name":"https"}]}}'
+      when:
+        - argocd_install_method == "manifest"
+        - argocd_check.rc != 0 or argocd_ns_check.rc != 0
+      register: argocd_patch_svc
+      changed_when: "'patched' in argocd_patch_svc.stdout"
+    
+    # === 方法 2: 使用 Helm 安装（备选）===
     - name: Deploy ArgoCD with Helm
       command: >
         helm install argocd argo/argo-cd
-        --namespace {{ platform_namespace }}
+        --namespace {{ argocd_namespace }}
         --create-namespace
         --version {{ argocd_chart_version }}
         --set server.service.type=NodePort
         --set server.service.nodePortHttp={{ argocd_http_nodeport }}
+        --set server.service.nodePortHttps={{ argocd_https_nodeport }}
         --set server.extraArgs[0]="--insecure"
         --set configs.params."server\.insecure"=true
         --wait
         --timeout 10m
-      when: argocd_check.rc != 0
-      register: argocd_deploy
-      changed_when: argocd_deploy.rc == 0
+      when:
+        - argocd_install_method == "helm"
+        - argocd_check.rc != 0
+      register: argocd_helm_deploy
+      changed_when: argocd_helm_deploy.rc == 0
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
     
-    - name: Wait for ArgoCD server pod to be ready
+    - name: Wait for ArgoCD server pod to be ready (Helm)
       command: >
         k3s kubectl wait --for=condition=ready pod
         -l app.kubernetes.io/name=argocd-server
-        -n {{ platform_namespace }}
+        -n {{ argocd_namespace }}
         --timeout=300s
-      when: argocd_check.rc != 0
-      register: argocd_wait
+      when:
+        - argocd_install_method == "helm"
+        - argocd_check.rc != 0
+      register: argocd_wait_helm
+      changed_when: false
+    
+    # === 通用: 获取密码和显示信息 ===
+    - name: Wait for ArgoCD initial admin secret to be created
+      command: >
+        k3s kubectl get secret argocd-initial-admin-secret
+        -n {{ argocd_namespace }}
+      register: secret_check
+      until: secret_check.rc == 0
+      retries: 30
+      delay: 5
+      when: argocd_check.rc != 0 or argocd_ns_check.rc != 0
       changed_when: false
     
     - name: Get ArgoCD initial admin password
       command: >
         k3s kubectl get secret argocd-initial-admin-secret
-        -n {{ platform_namespace }}
+        -n {{ argocd_namespace }}
         -o jsonpath="{.data.password}"
       register: argocd_password_base64
-      when: argocd_check.rc != 0
+      when: argocd_check.rc != 0 or argocd_ns_check.rc != 0
       changed_when: false
     
     - name: Decode ArgoCD password
       shell: echo "{{ argocd_password_base64.stdout }}" | base64 -d
       register: argocd_password
-      when: argocd_check.rc != 0
+      when: argocd_check.rc != 0 or argocd_ns_check.rc != 0
       changed_when: false
     
     - name: Display ArgoCD access information
       debug:
         msg: |
-          ✅ ArgoCD deployed successfully!
+          ✅ ArgoCD deployed successfully using {{ argocd_install_method }} method!
           
           Access ArgoCD at: http://<any-node-ip>:{{ argocd_http_nodeport }}
           Default credentials:
@@ -209,7 +279,10 @@
             Password: {{ argocd_password.stdout }}
           
           Important: Save this password or change it after first login!
-      when: argocd_check.rc != 0
+          
+          Tip: To change installation method, edit argocd_install_method variable
+               Options: 'manifest' (recommended) or 'helm'
+      when: argocd_check.rc != 0 or argocd_ns_check.rc != 0
 
     # ============================================================
     # 最终验证和总结
@@ -222,6 +295,11 @@
     - name: Get all services in platform namespace
       command: k3s kubectl get svc -n {{ platform_namespace }}
       register: all_services
+      changed_when: false
+    
+    - name: Get all pods in ArgoCD namespace
+      command: k3s kubectl get pods -n {{ argocd_namespace }}
+      register: argocd_pods
       changed_when: false
     
     - name: Get cluster node IPs
@@ -237,9 +315,9 @@
           ╚════════════════════════════════════════════════════════════════╝
           
           📦 Deployed Services:
-          ├─ Cert-Manager: Certificate management
-          ├─ Harbor: Container registry
-          └─ ArgoCD: GitOps continuous delivery
+          ├─ Cert-Manager: Certificate management ({{ platform_namespace }} namespace)
+          ├─ Harbor: Container registry ({{ platform_namespace }} namespace)
+          └─ ArgoCD: GitOps continuous delivery ({{ argocd_namespace }} namespace, {{ argocd_install_method }} method)
           
           🌐 Access URLs (use any node IP: {{ node_ips.stdout }}):
           ├─ Harbor:     http://<node-ip>:{{ harbor_http_nodeport }}
@@ -247,10 +325,13 @@
           └─ ArgoCD:     http://<node-ip>:{{ argocd_http_nodeport }}
                          admin / {{ argocd_password.stdout | default('check secret') }}
           
-          📋 All Pods in '{{ platform_namespace }}' namespace:
+          📋 Platform Pods ({{ platform_namespace }} namespace):
           {{ all_pods.stdout }}
           
-          🔗 All Services:
+          📋 ArgoCD Pods ({{ argocd_namespace }} namespace):
+          {{ argocd_pods.stdout }}
+          
+          🔗 Platform Services:
           {{ all_services.stdout }}
           
           ✅ Next Steps:
@@ -258,8 +339,10 @@
           2. Configure Docker to use Harbor as registry
           3. Deploy your first application using ArgoCD
           
-          💡 Monitoring: Use cloud provider monitoring or deploy Prometheus later if needed
+          💡 Installation Method: {{ argocd_install_method }}
+             To change: Edit 'argocd_install_method' in playbook vars
           📖 Documentation: docs/operations/installation.md
+          📖 Troubleshooting: TROUBLESHOOTING.md
     
     - name: Create quick access script
       copy:
@@ -281,10 +364,11 @@
           echo ""
           echo "🌐 ArgoCD:     http://${NODE_IP}:{{ argocd_http_nodeport }}"
           echo "   Username:   admin"
-          echo "   Password:   $(kubectl get secret argocd-initial-admin-secret -n {{ platform_namespace }} -o jsonpath="{.data.password}" | base64 -d 2>/dev/null || echo 'Run: kubectl get secret argocd-initial-admin-secret -n platform -o jsonpath={.data.password} | base64 -d')"
+          echo "   Password:   $(kubectl get secret argocd-initial-admin-secret -n {{ argocd_namespace }} -o jsonpath="{.data.password}" | base64 -d 2>/dev/null || echo 'Run: kubectl get secret argocd-initial-admin-secret -n {{ argocd_namespace }} -o jsonpath={.data.password} | base64 -d')"
           echo ""
           echo "📊 Check pod status:"
           echo "   kubectl get pods -n {{ platform_namespace }}"
+          echo "   kubectl get pods -n {{ argocd_namespace }}"
           echo ""
       
     - name: Display access script location
