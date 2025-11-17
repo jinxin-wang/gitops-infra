@@ -1,6 +1,7 @@
 #!/bin/bash
 # 环境初始化脚本 - 重构版（使用 Ansible）
 set -e
+export PATH=~/.conda/bin:$PATH ;
 
 # 颜色定义
 RED='\033[0;31m'
