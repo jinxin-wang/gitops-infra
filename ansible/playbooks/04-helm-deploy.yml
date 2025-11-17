@@ -304,7 +304,7 @@
     
     - name: Add GitLab Helm repository
       command: helm repo add gitlab https://charts.gitlab.io
-      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      when: gitlab_runner_ns_check.rc != 0 or (gitlab_runner_check is defined and gitlab_runner_check.rc != 0)
       register: gitlab_repo
       changed_when: "'has been added' in gitlab_repo.stdout"
       failed_when: false
@@ -313,7 +313,7 @@
     
     - name: Update Helm repositories for GitLab Runner
       command: helm repo update
-      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      when: gitlab_runner_ns_check.rc != 0 or (gitlab_runner_check is defined and gitlab_runner_check.rc != 0)
       changed_when: true
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
@@ -354,7 +354,7 @@
           
           concurrent: 10
           checkInterval: 30
-      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      when: gitlab_runner_ns_check.rc != 0 or (gitlab_runner_check is defined and gitlab_runner_check.rc != 0)
     
     - name: Deploy GitLab Runner with Helm
       command: >
@@ -365,7 +365,7 @@
         -f /tmp/gitlab-runner-values.yaml
         --wait
         --timeout 10m
-      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      when: gitlab_runner_ns_check.rc != 0 or (gitlab_runner_check is defined and gitlab_runner_check.rc != 0)
       register: gitlab_runner_deploy
       changed_when: gitlab_runner_deploy.rc == 0
       environment:
@@ -377,7 +377,7 @@
         -l app=gitlab-runner
         -n {{ gitlab_runner_namespace }}
         --timeout=300s
-      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      when: gitlab_runner_ns_check.rc != 0 or (gitlab_runner_check is defined and gitlab_runner_check.rc != 0)
       register: gitlab_runner_wait
       changed_when: false
     
@@ -385,7 +385,7 @@
       command: k3s kubectl get pods -n {{ gitlab_runner_namespace }}
       register: gitlab_runner_pods
       changed_when: false
-      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      when: gitlab_runner_ns_check.rc != 0 or (gitlab_runner_check is defined and gitlab_runner_check.rc != 0)
     
     - name: Get GitLab Runner logs (first 50 lines)
       command: >
@@ -394,7 +394,7 @@
         --tail=50
       register: gitlab_runner_logs
       changed_when: false
-      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      when: gitlab_runner_ns_check.rc != 0 or (gitlab_runner_check is defined and gitlab_runner_check.rc != 0)
     
     - name: Display GitLab Runner deployment information
       debug:
@@ -423,7 +423,7 @@
           - Check logs: kubectl logs -n {{ gitlab_runner_namespace }} -l app=gitlab-runner
           - Check token: Ensure gitlab_runner_token is correct in group_vars/all.yml
           - Network: Ensure runner can reach {{ gitlab_url }}
-      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      when: gitlab_runner_ns_check.rc != 0 or (gitlab_runner_check is defined and gitlab_runner_check.rc != 0)
 
     # ============================================================
     # 最终验证和总结

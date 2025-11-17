@@ -29,3 +29,42 @@ common_packages:
   - ca-certificates
   - gnupg
   - lsb-release
+
+# ============================================================
+# Platform Services Configuration
+# ============================================================
+
+# ArgoCD installation method
+argocd_install_method: "manifest"
+
+# Service port configuration
+harbor_http_nodeport: 30002
+argocd_http_nodeport: 30003
+argocd_https_nodeport: 30443
+
+# Version configuration
+harbor_chart_version: "1.13.1"
+argocd_chart_version: "5.51.6"
+cert_manager_chart_version: "v1.13.3"
+
+# ArgoCD Manifest URL
+argocd_manifest_url: "https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
+
+# Namespace configuration
+platform_namespace: platform
+argocd_namespace: argocd
+gitlab_runner_namespace: gitlab-runner
+
+# Harbor configuration
+harbor_admin_password: "Harbor12345"
+harbor_registry_size: "10Gi"
+harbor_database_size: "2Gi"
+harbor_redis_size: "1Gi"
+harbor_trivy_size: "5Gi"
+
+# GitLab Runner configuration
+gitlab_url: "https://gitlab.com/"
+gitlab_runner_token: "YOUR_GITLAB_RUNNER_TOKEN_HERE"
+gitlab_runner_chart_version: "0.58.2"
+gitlab_runner_concurrent: 10
+gitlab_runner_check_interval: 30
