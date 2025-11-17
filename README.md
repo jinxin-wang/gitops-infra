@@ -93,25 +93,7 @@
 | **监控** | 3层分层 | 单层本地 | 初期Prometheus + Grafana足够 |
 | **链路追踪** | Jaeger | 暂不引入 | 等服务>30个再考虑 |
 
-### 2.2 成本优先
-
-**基础设施成本：**
-```
-3台 4C8G 云服务器 (腾讯云/阿里云): ¥2000-3000/月
-总成本: ¥24000-36000/年
-```
-
-**人力投入：**
-- 1个全职运维 (管理K8s、Harbor、ArgoCD)
-- 1个兼职开发 (编写CI脚本、监控告警)
-
-**不花钱的部分：**
-- GitLab (可用CE开源版)
-- ArgoCD (开源)
-- Prometheus/Grafana (开源)
-- K3s (开源，比K8s轻量)
-
-### 2.3 快速迭代
+### 2.2 快速迭代
 
 从最小MVP开始，逐步完善：
 
@@ -200,24 +182,17 @@ Helm (包管理工具)
 ### 4.2 代码仓库
 
 ```
-选项1: GitLab CE (推荐)
+GitLab CE
 ├─ 功能: 完整的Git + CI/CD + Container Registry
 ├─ 资源: ~1.5GB内存 (shared_buffers较低时)
 ├─ 维护: 每月自动升级
 └─ 部署: Helm Chart (gitlab/gitlab-ce)
-
-选项2: GitHub + GitHub Actions
-├─ 优点: 无需自建，云端管理
-├─ 缺点: 没有私有Container Registry，需要Harbor
-└─ 建议: 小团队可用
 ```
-
-**建议：使用GitLab CE**
 
 ### 4.3 容器镜像仓库
 
 ```
-Harbor (必选)
+Harbor
 ├─ 功能: 
 │  ├─ 存储Docker镜像
 │  ├─ 代理PyPI/npm/Go Mod等 (无需Nexus)
@@ -230,7 +205,7 @@ Harbor (必选)
 ### 4.4 CI/CD引擎
 
 ```
-GitLab CI Runner (必选)
+GitLab CI Runner
 ├─ 工作原理:
 │  ├─ GitLab发送Webhook
 │  ├─ Runner接收任务
@@ -239,17 +214,12 @@ GitLab CI Runner (必选)
 ├─ 资源占用: <100MB (idle状态)
 ├─ 并发能力: 可同时运行10+个Pod
 └─ 部署: Helm Chart (gitlab-runner/gitlab-runner)
-
-为什么不用Tekton?
-├─ Tekton太复杂，学习曲线陡峭
-├─ GitLab CI的YAML配置更简单
-└─ 功能足够应付10个微服务
 ```
 
 ### 4.5 GitOps部署引擎
 
 ```
-ArgoCD (必选)
+ArgoCD 
 ├─ 职责:
 │  ├─ 持续监控GitOps仓库
 │  ├─ 自动同步应用到K8s
@@ -262,9 +232,9 @@ ArgoCD (必选)
 
 ### 4.6 监控与日志
 
-#### 监控方案（三选一）
+#### 监控方案
 
-**方案A：最小化监控（启动阶段推荐）**
+**最小化监控（启动阶段推荐）**
 ```
 云厂商监控 + metrics-server
 ├─ 云厂商监控 (腾讯云/阿里云):
@@ -289,74 +259,15 @@ ArgoCD (必选)
   ❌ 无历史数据存储
 ```
 
-**方案B：轻量级监控（平衡方案）**
+**路线：**
 ```
-云厂商监控 + Prometheus (无Grafana)
-├─ Prometheus:
-│  ├─ 收集K8s节点、Pod的指标
-│  ├─ 提供基础查询界面
-│  ├─ 支持告警规则
-│  └─ 资源: ~0.5GB内存
-│
-└─ 云厂商监控:
-   └─ 服务器层面监控
-
-部署方式:
-  helm install prometheus prometheus-community/prometheus \
-    -n monitoring --set grafana.enabled=false
-
-优点:
-  ✅ 有历史数据存储
-  ✅ 资源占用适中
-  ✅ 支持告警
-缺点:
-  ❌ 查询界面简陋
+Month 1-2: 最小化监控 → 快速启动
+Month 3+:  完整   → 稳定运行后升级
 ```
 
-**方案C：完整监控（长期推荐）**
+#### 日志方案
 ```
-Prometheus + Grafana
-├─ Prometheus:
-│  ├─ 收集K8s节点、Pod的指标
-│  ├─ 收集应用自定义指标
-│  ├─ 支持复杂告警规则
-│  └─ 资源: ~0.5GB内存
-│
-└─ Grafana:
-   ├─ 强大的可视化能力
-   ├─ 丰富的Dashboard模板
-   ├─ 多数据源支持
-   └─ 资源: ~0.2GB内存
-
-部署方式:
-  helm install prometheus prometheus-community/kube-prometheus-stack -n monitoring
-
-优点:
-  ✅ 功能完整
-  ✅ 可视化强大
-  ✅ 行业标准
-缺点:
-  ❌ 占用0.7GB内存
-```
-
-**建议路线：**
-```
-Month 1-2: 方案A (最小化) → 快速启动
-Month 3+:  方案C (完整)   → 稳定运行后升级
-```
-
-#### 日志方案（三选一）
-
-```
-为什么初期不用ELK/Loki?
-├─ 应用少，日志量小
-├─ kubectl logs 足够
-├─ 云厂商提供日志服务
-└─ 等日志量>100GB/天再升级
-
-选项1: 云厂商日志服务 (推荐，无需维护)
-选项2: kubectl logs (极简，应急够用)
-选项3: 自建Loki (需要额外资源，暂不推荐)
+kubectl logs (极简，应急够用)
 ```
 
 ### 4.7 完整服务清单
@@ -376,24 +287,6 @@ Month 3+:  方案C (完整)   → 稳定运行后升级
 | Cert-Manager | 0.1GB | ✅ | K3s Pod |
 | **总计** | **≈11GB** | — | **适合3台4C8G** |
 
-**完整配置（稳定运行后）：**
-| 服务 | 资源占用 | 是否必需 | 部署方式 |
-|------|---------|---------|---------|
-| K3s Master | 2GB | ✅ | 云服务器1 |
-| K3s Worker | 6GB (shared) | ✅ | 云服务器2-3 |
-| GitLab CE | 1.5GB | ✅ | K3s Pod |
-| Harbor | 1GB | ✅ | K3s Pod |
-| GitLab Runner | 0.1GB | ✅ | K3s Pod |
-| ArgoCD | 0.3GB | ✅ | K3s Pod |
-| Prometheus | 0.5GB | 📊 推荐 | K3s Pod |
-| Grafana | 0.2GB | 📊 推荐 | K3s Pod |
-| Cert-Manager | 0.1GB | ✅ | K3s Pod |
-| **总计** | **≈12GB** | — | **适合3台4C8G** |
-
-**说明：**
-- ✅ 必需：核心功能，必须部署
-- 📊 推荐：强烈建议部署，但可延后到Month 3+
-
 ---
 
 ## 5. 基础设施
@@ -405,18 +298,17 @@ Month 3+:  方案C (完整)   → 稳定运行后升级
 
 服务器规格:
   Server-1 (K3s Master + Harbor):
-    CPU: 4核
-    内存: 8GB
-    磁盘: 100GB SSD
-    带宽: 5Mbps
+    CPU: 2核
+    内存: 4GB
+    磁盘: 40GB SSD
+    带宽: 峰值100
   
   Server-2 & Server-3 (K3s Worker):
-    CPU: 4核 (每个)
-    内存: 8GB (每个)
-    磁盘: 100GB SSD (每个)
+    CPU: 2核 (每个)
+    内存: 4GB (每个)
+    磁盘: 40GB SSD (每个)
     带宽: 5Mbps
 
-总成本: ¥2000-3000/月 (按使用量计费)
 ```
 
 ### 5.2 存储方案
@@ -426,25 +318,13 @@ Pod存储 (临时):
   └─ K3s默认 (local storage)
     ├─ 用于: 应用Pod的工作文件
     └─ 特点: Pod删除后自动清理
-
-持久化存储:
-  ├─ 数据库 (PostgreSQL/MySQL):
-    │  └─ 方案1: 云厂商托管RDS (推荐，无需维护)
-    │  └─ 方案2: Pod内运行数据库 (简单但有风险)
-    │
-  ├─ Harbor镜像存储:
-    │  └─ 方案1: 云厂商对象存储 (S3/OSS, 推荐)
-    │  └─ 方案2: 本地SSD (需要备份计划)
-    │
-  └─ 备份:
-     └─ 用Velero自动备份etcd + 应用数据
 ```
 
 ### 5.3 网络配置
 
 ```
-DNS: 云厂商提供 (如果自建GitLab需要域名)
-  ├─ 分配一个域名 (例如: gitlab.mycompany.com)
+DNS: 云厂商提供
+  ├─ 分配一个域名 (gitlab.lausencake.com)
   └─ 配置CNAME指向负载均衡器
 
 负载均衡:
@@ -455,10 +335,6 @@ DNS: 云厂商提供 (如果自建GitLab需要域名)
   ├─ 入站: 80/443 (HTTP/HTTPS) 对所有
   ├─ 入站: 22 (SSH) 仅运维网络
   └─ 出站: 全部允许 (拉取依赖包)
-
-VPN (可选):
-  ├─ 如需访问本地数据库，配置VPN
-  └─ 初期可不配，先用云端资源
 ```
 
 ### 5.4 安全配置
@@ -471,13 +347,9 @@ VPN (可选):
     └─ 无需手动维护
 
 密钥管理:
-  ├─ K8s Secrets (初期用这个)
-  │  └─ 存储数据库密码、镜像拉取凭证等
-  │
-  ├─ Sealed Secrets (推荐升级到这个)
-  │  └─ 密钥加密存储在Git中
-  │
-  └─ Vault (等规模扩大再用)
+  └─ K8s Secrets (初期用这个)
+     └─ 存储数据库密码、镜像拉取凭证等
+
 
 镜像安全:
   ├─ Harbor启用镜像扫描 (Trivy)
@@ -501,7 +373,7 @@ stages:
 
 variables:
   DOCKER_TLS_CERTDIR: ""
-  REGISTRY: harbor.mycompany.com
+  REGISTRY: harbor.lausencake.com.cn
   DOCKER_HOST: tcp://docker:2375
 
 # ==================== TEST阶段 ====================
@@ -623,19 +495,7 @@ deploy:production:
 
 ### 6.2 GitOps流程详解
 
-**方案1：直接用kubectl (简单)**
-```bash
-# 部署应用
-kubectl apply -f k8s/deployment.yaml -n dev
-
-# 查看状态
-kubectl get deployment -n dev
-
-# 回滚
-kubectl rollout undo deployment/myapp -n dev
-```
-
-**方案2：用Kustomize + ArgoCD (推荐)**
+**Kustomize + ArgoCD**
 
 ```
 gitops-repo/
@@ -764,26 +624,7 @@ git push origin main
 
 ## 7. 成本与性能
 
-### 7.1 成本分解
-
-```
-固定成本 (月):
-├─ 服务器: 3台 4C8G = ¥2000-3000
-├─ 带宽: 5Mbps = ¥200-300
-├─ 存储: 300GB SSD = ¥100-200
-└─ 数据库(RDS): 2GB存储 = ¥200-300
-   ━━━━━━━━━━━━━━━━━━━━━━━━
-   小计: ¥2500-3800/月
-
-变量成本:
-├─ 流量超额 (初期应该不会)
-├─ 备份存储 (初期可忽略)
-└─ Snapshot成本 (初期可忽略)
-
-年度预算: ¥30000-45600 (不含人力)
-```
-
-### 7.2 资源利用率预测
+### 7.1 资源利用率预测
 
 ```
 初期(2-3个月):
@@ -802,7 +643,7 @@ git push origin main
 └─ 磁盘>90% → 清理旧镜像或升级存储
 ```
 
-### 7.3 性能指标目标
+### 7.2 性能指标目标
 
 | 指标 | 目标 | 说明 |
 |------|------|------|
@@ -1082,32 +923,6 @@ Month 12+: 规模化
   └─ 专业SRE团队接管运维
 ```
 
-### 10.4 学习优先级
-
-如果你的团队需要提升技能，建议学习顺序：
-
-```
-第1优先级 (必须):
-├─ Docker基础
-├─ Kubernetes基础概念
-└─ kubectl命令行
-
-第2优先级 (重要):
-├─ YAML文件编写
-├─ Kustomize配置管理
-├─ GitOps理念
-
-第3优先级 (推荐):
-├─ ArgoCD进阶用法
-├─ Helm Charts
-└─ K8s故障排查
-
-第4优先级 (可选):
-├─ Service Mesh (Istio/Cilium)
-├─ 可观测性 (Prometheus/Grafana)
-└─ 多集群管理 (Rancher)
-```
-
 ---
 
 ## 11. 快速参考
@@ -1201,6 +1016,35 @@ spec:
   - port: 80
     targetPort: 8000
 ```
+
+
+## 12. 工作计划总览
+
+### **阶段1：基础设施搭建（第1-2周）**
+- **采购资源**：3台4C8G云服务器 + 域名 + 对象存储
+- **搭建K3s集群**：1个Master + 2个Worker节点
+- **部署平台服务**：Harbor、ArgoCD、Prometheus/Grafana、Cert-Manager
+- **配置安全**：DNS、负载均衡、HTTPS证书、防火墙规则
+
+### **阶段2：验证与优化（第3-4周）**
+- **首个服务迁移**：选择最简单的微服务验证CI/CD流程
+- **流程优化**：优化Dockerfile、CI耗时、资源配置
+- **文档编写**：操作指南、故障排查手册、备份恢复流程
+- **团队培训**：架构讲解、实操演示、答疑讨论
+
+### **阶段3：全量迁移（第5-8周）**
+- **Week 5**：迁移2-3个核心微服务
+- **Week 6**：迁移4-6个微服务
+- **Week 7**：迁移7-10个微服务
+- **Week 8**：完成所有服务，全流程测试，建立监控告警
+
+## 🎯 关键检查点
+
+| 阶段 | 验收标准 |
+|------|---------|
+| **第2周** | ✅ K3s集群3节点Ready<br>✅ Harbor可访问并推送镜像<br>✅ ArgoCD部署成功 |
+| **第4周** | ✅ 首个微服务完整CI/CD流程通过<br>✅ 三环境(dev/staging/prod)可用<br>✅ 团队能独立操作 |
+| **第8周** | ✅ 10个微服务全部迁移<br>✅ 监控告警正常工作<br>✅ 备份策略验证通过 |
 
 ---
 
