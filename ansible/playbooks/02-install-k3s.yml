@@ -31,8 +31,6 @@
     - name: Create K3s server config file
       copy:
         content: |
-          cluster-cidr: {{ k3s_server_config.cluster_cidr | default('10.42.0.0/16') }}
-          service-cidr: {{ k3s_server_config.service_cidr | default('10.43.0.0/16') }}
           disable:
             - traefik
           write-kubeconfig-mode: "0644"

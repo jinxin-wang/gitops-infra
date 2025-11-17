@@ -168,26 +168,14 @@ fi
 # Step 9: 运行 Ansible playbooks
 print_section "Step 9: Run Ansible Playbooks"
 
-read -p "Do you want to prepare nodes? (y/n) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    print_info "Running playbook: 01-prepare-nodes.yml"
-    ansible-playbook playbooks/01-prepare-nodes.yml
-fi
+print_info "Running playbook: 01-prepare-nodes.yml"
+ansible-playbook playbooks/01-prepare-nodes.yml
 
-read -p "Do you want to install K3s cluster? (y/n) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    print_info "Running playbook: 02-install-k3s.yml"
-    ansible-playbook playbooks/02-install-k3s.yml
-fi
+print_info "Running playbook: 02-install-k3s.yml"
+ansible-playbook playbooks/02-install-k3s.yml
 
-read -p "Do you want to deploy platform services? (y/n) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    print_info "Running playbook: 03-deploy-platform.yml"
-    ansible-playbook playbooks/03-deploy-platform.yml
-fi
+print_info "Running playbook: 03-deploy-platform.yml"
+ansible-playbook playbooks/03-deploy-platform.yml
 
 # Step 10: 完成
 print_section "Setup Complete!"
