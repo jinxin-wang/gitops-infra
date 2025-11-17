@@ -1,0 +1,294 @@
+---
+# Playbook 04: Deploy platform services using Helm
+- name: Deploy Harbor, ArgoCD, and Cert-Manager with Helm
+  hosts: k3s_master
+  become: true
+  gather_facts: true
+  
+  vars:
+    kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+    platform_namespace: platform
+    
+    # Helm chart versions (可根据需要调整版本)
+    harbor_chart_version: "1.13.1"
+    argocd_chart_version: "5.51.6"
+    cert_manager_chart_version: "v1.13.3"
+    
+    # 服务端口配置
+    harbor_http_nodeport: 30002
+    argocd_http_nodeport: 30003
+
+  tasks:
+    # ============================================================
+    # 前置检查
+    # ============================================================
+    - name: Check if Helm is installed
+      command: which helm
+      register: helm_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Fail if Helm is not installed
+      fail:
+        msg: "Helm is not installed. Please run playbook 03-deploy-platform.yml first."
+      when: helm_check.rc != 0
+    
+    - name: Check K3s cluster status
+      command: k3s kubectl get nodes
+      register: k3s_status
+      changed_when: false
+      failed_when: k3s_status.rc != 0
+    
+    - name: Display cluster status
+      debug:
+        msg: "K3s cluster is ready with {{ k3s_status.stdout_lines | length - 1 }} nodes"
+
+    # ============================================================
+    # 部署 Cert-Manager (最先部署，其他服务可能需要证书)
+    # ============================================================
+    - name: Check if Cert-Manager is already installed
+      shell: helm list -n {{ platform_namespace }} | grep cert-manager
+      register: cert_manager_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Add Jetstack Helm repository for Cert-Manager
+      command: helm repo add jetstack https://charts.jetstack.io
+      when: cert_manager_check.rc != 0
+      register: jetstack_repo
+      changed_when: "'has been added' in jetstack_repo.stdout"
+      failed_when: false
+    
+    - name: Update Helm repositories
+      command: helm repo update
+      when: cert_manager_check.rc != 0
+      changed_when: true
+    
+    - name: Deploy Cert-Manager with Helm
+      command: >
+        helm install cert-manager jetstack/cert-manager
+        --namespace {{ platform_namespace }}
+        --create-namespace
+        --version {{ cert_manager_chart_version }}
+        --set installCRDs=true
+        --wait
+        --timeout 10m
+      when: cert_manager_check.rc != 0
+      register: cert_manager_deploy
+      changed_when: cert_manager_deploy.rc == 0
+    
+    - name: Wait for Cert-Manager pods to be ready
+      command: >
+        k3s kubectl wait --for=condition=ready pod
+        -l app.kubernetes.io/instance=cert-manager
+        -n {{ platform_namespace }}
+        --timeout=300s
+      when: cert_manager_check.rc != 0
+      register: cert_manager_wait
+      changed_when: false
+
+    # ============================================================
+    # 部署 Harbor (镜像仓库)
+    # ============================================================
+    - name: Check if Harbor is already installed
+      shell: helm list -n {{ platform_namespace }} | grep harbor
+      register: harbor_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Deploy Harbor with Helm (using default values)
+      command: >
+        helm install harbor harbor/harbor
+        --namespace {{ platform_namespace }}
+        --create-namespace
+        --version {{ harbor_chart_version }}
+        --set expose.type=nodePort
+        --set expose.tls.enabled=false
+        --set expose.nodePort.ports.http.nodePort={{ harbor_http_nodeport }}
+        --set persistence.enabled=true
+        --set persistence.persistentVolumeClaim.registry.size=10Gi
+        --set persistence.persistentVolumeClaim.database.size=2Gi
+        --set persistence.persistentVolumeClaim.redis.size=1Gi
+        --set persistence.persistentVolumeClaim.trivy.size=5Gi
+        --set harborAdminPassword=Harbor12345
+        --set trivy.enabled=true
+        --wait
+        --timeout 15m
+      when: harbor_check.rc != 0
+      register: harbor_deploy
+      changed_when: harbor_deploy.rc == 0
+    
+    - name: Wait for Harbor core pod to be ready
+      command: >
+        k3s kubectl wait --for=condition=ready pod
+        -l component=core
+        -n {{ platform_namespace }}
+        --timeout=600s
+      when: harbor_check.rc != 0
+      register: harbor_wait
+      changed_when: false
+    
+    - name: Get Harbor service info
+      command: k3s kubectl get svc harbor -n {{ platform_namespace }}
+      register: harbor_svc
+      changed_when: false
+      when: harbor_check.rc != 0
+    
+    - name: Display Harbor access information
+      debug:
+        msg: |
+          ✅ Harbor deployed successfully!
+          
+          Access Harbor at: http://<any-node-ip>:{{ harbor_http_nodeport }}
+          Default credentials:
+            Username: admin
+            Password: Harbor12345
+          
+          Service info:
+          {{ harbor_svc.stdout }}
+      when: harbor_check.rc != 0
+
+    # ============================================================
+    # 部署 ArgoCD (GitOps 引擎)
+    # ============================================================
+    - name: Check if ArgoCD is already installed
+      shell: helm list -n {{ platform_namespace }} | grep argocd
+      register: argocd_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Deploy ArgoCD with Helm
+      command: >
+        helm install argocd argo/argo-cd
+        --namespace {{ platform_namespace }}
+        --create-namespace
+        --version {{ argocd_chart_version }}
+        --set server.service.type=NodePort
+        --set server.service.nodePortHttp={{ argocd_http_nodeport }}
+        --set server.extraArgs[0]="--insecure"
+        --set configs.params."server\.insecure"=true
+        --wait
+        --timeout 10m
+      when: argocd_check.rc != 0
+      register: argocd_deploy
+      changed_when: argocd_deploy.rc == 0
+    
+    - name: Wait for ArgoCD server pod to be ready
+      command: >
+        k3s kubectl wait --for=condition=ready pod
+        -l app.kubernetes.io/name=argocd-server
+        -n {{ platform_namespace }}
+        --timeout=300s
+      when: argocd_check.rc != 0
+      register: argocd_wait
+      changed_when: false
+    
+    - name: Get ArgoCD initial admin password
+      command: >
+        k3s kubectl get secret argocd-initial-admin-secret
+        -n {{ platform_namespace }}
+        -o jsonpath="{.data.password}"
+      register: argocd_password_base64
+      when: argocd_check.rc != 0
+      changed_when: false
+    
+    - name: Decode ArgoCD password
+      shell: echo "{{ argocd_password_base64.stdout }}" | base64 -d
+      register: argocd_password
+      when: argocd_check.rc != 0
+      changed_when: false
+    
+    - name: Display ArgoCD access information
+      debug:
+        msg: |
+          ✅ ArgoCD deployed successfully!
+          
+          Access ArgoCD at: http://<any-node-ip>:{{ argocd_http_nodeport }}
+          Default credentials:
+            Username: admin
+            Password: {{ argocd_password.stdout }}
+          
+          Important: Save this password or change it after first login!
+      when: argocd_check.rc != 0
+
+    # ============================================================
+    # 最终验证和总结
+    # ============================================================
+    - name: Get all pods in platform namespace
+      command: k3s kubectl get pods -n {{ platform_namespace }}
+      register: all_pods
+      changed_when: false
+    
+    - name: Get all services in platform namespace
+      command: k3s kubectl get svc -n {{ platform_namespace }}
+      register: all_services
+      changed_when: false
+    
+    - name: Get cluster node IPs
+      shell: k3s kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}'
+      register: node_ips
+      changed_when: false
+    
+    - name: Display deployment summary
+      debug:
+        msg: |
+          ╔════════════════════════════════════════════════════════════════╗
+          ║          🎉 Platform Services Deployment Complete!            ║
+          ╚════════════════════════════════════════════════════════════════╝
+          
+          📦 Deployed Services:
+          ├─ Cert-Manager: Certificate management
+          ├─ Harbor: Container registry
+          └─ ArgoCD: GitOps continuous delivery
+          
+          🌐 Access URLs (use any node IP: {{ node_ips.stdout }}):
+          ├─ Harbor:     http://<node-ip>:{{ harbor_http_nodeport }}
+          │              admin / Harbor12345
+          └─ ArgoCD:     http://<node-ip>:{{ argocd_http_nodeport }}
+                         admin / {{ argocd_password.stdout | default('check secret') }}
+          
+          📋 All Pods in '{{ platform_namespace }}' namespace:
+          {{ all_pods.stdout }}
+          
+          🔗 All Services:
+          {{ all_services.stdout }}
+          
+          ✅ Next Steps:
+          1. Access Harbor and create a project
+          2. Configure Docker to use Harbor as registry
+          3. Deploy your first application using ArgoCD
+          
+          💡 Monitoring: Use cloud provider monitoring or deploy Prometheus later if needed
+          📖 Documentation: docs/operations/installation.md
+    
+    - name: Create quick access script
+      copy:
+        dest: /tmp/platform-access.sh
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          # Quick access script for platform services
+          
+          NODE_IP=$(hostname -I | awk '{print $1}')
+          
+          echo "╔════════════════════════════════════════════════════════════════╗"
+          echo "║              Platform Services Access Information              ║"
+          echo "╚════════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "🌐 Harbor:     http://${NODE_IP}:{{ harbor_http_nodeport }}"
+          echo "   Username:   admin"
+          echo "   Password:   Harbor12345"
+          echo ""
+          echo "🌐 ArgoCD:     http://${NODE_IP}:{{ argocd_http_nodeport }}"
+          echo "   Username:   admin"
+          echo "   Password:   $(kubectl get secret argocd-initial-admin-secret -n {{ platform_namespace }} -o jsonpath="{.data.password}" | base64 -d 2>/dev/null || echo 'Run: kubectl get secret argocd-initial-admin-secret -n platform -o jsonpath={.data.password} | base64 -d')"
+          echo ""
+          echo "📊 Check pod status:"
+          echo "   kubectl get pods -n {{ platform_namespace }}"
+          echo ""
+      
+    - name: Display access script location
+      debug:
+        msg: |
+          💡 Tip: A quick access script has been created at /tmp/platform-access.sh
+          Run it anytime with: /tmp/platform-access.sh
