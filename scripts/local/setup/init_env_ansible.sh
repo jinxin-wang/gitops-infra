@@ -177,6 +177,9 @@ ansible-playbook playbooks/02-install-k3s.yml
 print_info "Running playbook: 03-deploy-platform.yml"
 ansible-playbook playbooks/03-deploy-platform.yml
 
+print_info "Running playbook: 04-helm-deploy.yml"
+ansible-playbook playbooks/04-helm-deploy.yml
+
 # Step 10: 完成
 print_section "Setup Complete!"
 print_info "K3s cluster is ready!"
