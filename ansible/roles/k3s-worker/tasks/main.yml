@@ -1,0 +1,22 @@
+---
+# K3s Worker role - install and configure K3s agent
+- name: Check if K3s agent is already installed
+  stat:
+    path: /usr/local/bin/k3s
+  register: k3s_agent_binary
+
+- name: Download K3s installation script
+  get_url:
+    url: "{{ k3s_install_script_url }}"
+    dest: /tmp/k3s-install.sh
+    mode: '0755'
+  when: not k3s_agent_binary.stat.exists
+
+- name: Install K3s agent
+  shell: |
+    INSTALL_K3S_VERSION={{ k3s_version }} \
+    K3S_URL=https://{{ hostvars[groups['k3s_master'][0]]['ansible_host'] }}:6443 \
+    K3S_TOKEN={{ hostvars[groups['k3s_master'][0]]['k3s_token'] }} \
+    /tmp/k3s-install.sh agent {{ k3s_agent_options | default([]) | join(' ') }}
+  args:
+    creates: /usr/local/bin/k3s

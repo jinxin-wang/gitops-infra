@@ -1,0 +1,6 @@
+---
+# K3s Worker specific variables
+
+# K3s agent options
+k3s_agent_options:
+  - "--node-label node-type=worker"

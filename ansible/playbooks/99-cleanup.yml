@@ -1,0 +1,70 @@
+---
+# Playbook 99: Cleanup K3s cluster
+- name: Uninstall K3s from all nodes
+  hosts: k3s_cluster
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Display cleanup information
+      debug:
+        msg: "Cleaning up K3s on {{ inventory_hostname }}"
+    
+    - name: Check if K3s uninstall script exists (server)
+      stat:
+        path: /usr/local/bin/k3s-uninstall.sh
+      register: k3s_server_uninstall
+    
+    - name: Check if K3s agent uninstall script exists
+      stat:
+        path: /usr/local/bin/k3s-agent-uninstall.sh
+      register: k3s_agent_uninstall
+    
+    - name: Uninstall K3s server
+      command: /usr/local/bin/k3s-uninstall.sh
+      when: k3s_server_uninstall.stat.exists
+      register: uninstall_server
+      changed_when: uninstall_server.rc == 0
+    
+    - name: Uninstall K3s agent
+      command: /usr/local/bin/k3s-agent-uninstall.sh
+      when: k3s_agent_uninstall.stat.exists
+      register: uninstall_agent
+      changed_when: uninstall_agent.rc == 0
+    
+    - name: Remove K3s directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/rancher
+        - /var/lib/rancher
+        - /var/lib/kubelet
+        - /etc/cni
+        - /opt/cni
+        - /var/lib/cni
+    
+    - name: Display cleanup completion
+      debug:
+        msg: "K3s cleanup completed on {{ inventory_hostname }}"
+
+- name: Remove local kubeconfig
+  hosts: localhost
+  become: false
+  gather_facts: false
+  
+  tasks:
+    - name: Remove local kubeconfig file
+      file:
+        path: "{{ lookup('env', 'HOME') }}/.kube/config-k3s-local"
+        state: absent
+    
+    - name: Display final message
+      debug:
+        msg: |
+          ✅ K3s cluster cleanup completed!
+          
+          All K3s components have been removed from:
+          {% for host in groups['k3s_cluster'] %}
+          - {{ host }}
+          {% endfor %}

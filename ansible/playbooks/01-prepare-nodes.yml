@@ -1,0 +1,93 @@
+---
+# Playbook 01: Prepare all nodes (system updates, packages, security)
+- name: Prepare all K3s nodes
+  hosts: k3s_cluster
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Display node information
+      debug:
+        msg: "Preparing {{ inventory_hostname }} ({{ ansible_host }})"
+    
+    - name: Set timezone
+      timezone:
+        name: "{{ timezone }}"
+    
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+    
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+      register: upgrade_result
+      changed_when: upgrade_result.changed
+    
+    - name: Install common packages
+      apt:
+        name: "{{ common_packages }}"
+        state: present
+    
+    - name: Disable swap permanently
+      shell: |
+        swapoff -a
+        sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+      args:
+        warn: false
+      register: swap_result
+      changed_when: swap_result.rc == 0
+    
+    - name: Load kernel modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - br_netfilter
+        - overlay
+    
+    - name: Make kernel modules persistent
+      copy:
+        content: |
+          br_netfilter
+          overlay
+        dest: /etc/modules-load.d/k3s.conf
+        mode: '0644'
+    
+    - name: Set sysctl parameters for Kubernetes
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+        sysctl_file: /etc/sysctl.d/k3s.conf
+      loop:
+        - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+        - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { name: 'net.ipv4.ip_forward', value: '1' }
+    
+    - name: Reboot if required
+      reboot:
+        msg: "Rebooting node for kernel updates"
+        connect_timeout: 5
+        reboot_timeout: 300
+        pre_reboot_delay: 0
+        post_reboot_delay: 30
+        test_command: uptime
+      when: upgrade_result.changed and 'reboot' in upgrade_result.stdout | default('')
+    
+    - name: Wait for nodes to come back online
+      wait_for_connection:
+        delay: 10
+        timeout: 300
+      when: upgrade_result.changed
+    
+    - name: Verify connectivity
+      ping:
+    
+    - name: Display completion message
+      debug:
+        msg: "Node {{ inventory_hostname }} prepared successfully"

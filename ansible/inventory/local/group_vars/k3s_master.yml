@@ -1,0 +1,19 @@
+---
+# K3s Master specific variables
+
+# K3s server options
+k3s_server_options:
+  - "--disable traefik"                    # Disable default Traefik ingress
+  - "--write-kubeconfig-mode 644"          # Make kubeconfig readable
+  - "--cluster-cidr 10.42.0.0/16"          # Pod CIDR
+  - "--service-cidr 10.43.0.0/16"          # Service CIDR
+  - "--flannel-backend vxlan"              # Flannel backend
+  - "--kube-apiserver-arg service-node-port-range=30000-32767"  # NodePort range
+
+# K3s server configuration file
+k3s_server_config:
+  cluster-cidr: "10.42.0.0/16"
+  service-cidr: "10.43.0.0/16"
+  disable:
+    - traefik
+  write-kubeconfig-mode: "0644"

@@ -1,0 +1,34 @@
+---
+# K3s Master role - install and configure K3s server
+- name: Check if K3s is already installed
+  stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Download K3s installation script
+  get_url:
+    url: "{{ k3s_install_script_url }}"
+    dest: /tmp/k3s-install.sh
+    mode: '0755'
+  when: not k3s_binary.stat.exists
+
+- name: Create K3s config directory
+  file:
+    path: "{{ k3s_config_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Install K3s server
+  shell: |
+    INSTALL_K3S_VERSION={{ k3s_version }} \
+    /tmp/k3s-install.sh server {{ k3s_server_options | join(' ') }}
+  args:
+    creates: /usr/local/bin/k3s
+
+- name: Wait for K3s to be ready
+  command: k3s kubectl get nodes
+  register: k3s_ready
+  until: k3s_ready.rc == 0
+  retries: 30
+  delay: 10
+  changed_when: false

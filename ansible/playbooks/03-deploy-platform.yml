@@ -1,0 +1,96 @@
+---
+# Playbook 03: Deploy platform services (Harbor, ArgoCD, Prometheus, Grafana)
+- name: Deploy platform services on K3s cluster
+  hosts: k3s_master
+  become: true
+  gather_facts: true
+  
+  vars:
+    helm_version: v3.13.3
+    helm_install_dir: /usr/local/bin
+  
+  tasks:
+    - name: Check if Helm is installed
+      stat:
+        path: "{{ helm_install_dir }}/helm"
+      register: helm_binary
+    
+    - name: Download Helm installation script
+      get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get-helm-3.sh
+        mode: '0755'
+      when: not helm_binary.stat.exists
+    
+    - name: Install Helm
+      shell: /tmp/get-helm-3.sh
+      environment:
+        HELM_INSTALL_DIR: "{{ helm_install_dir }}"
+      when: not helm_binary.stat.exists
+      register: helm_install
+      changed_when: helm_install.rc == 0
+    
+    - name: Verify Helm installation
+      command: helm version --short
+      register: helm_version_output
+      changed_when: false
+    
+    - name: Display Helm version
+      debug:
+        msg: "{{ helm_version_output.stdout }}"
+    
+    - name: Add Helm repositories
+      command: "helm repo add {{ item.name }} {{ item.url }}"
+      loop:
+        - { name: 'harbor', url: 'https://helm.goharbor.io' }
+        - { name: 'argo', url: 'https://argoproj.github.io/argo-helm' }
+        - { name: 'prometheus-community', url: 'https://prometheus-community.github.io/helm-charts' }
+        - { name: 'grafana', url: 'https://grafana.github.io/helm-charts' }
+      register: helm_repo_add
+      changed_when: "'has been added' in helm_repo_add.stdout"
+      failed_when: false
+    
+    - name: Update Helm repositories
+      command: helm repo update
+      register: helm_repo_update
+      changed_when: helm_repo_update.rc == 0
+    
+    - name: Create platform namespace
+      command: k3s kubectl create namespace platform
+      register: create_namespace
+      failed_when: false
+      changed_when: "'created' in create_namespace.stdout"
+    
+    - name: Create dev namespace
+      command: k3s kubectl create namespace dev
+      register: create_dev_namespace
+      failed_when: false
+      changed_when: "'created' in create_dev_namespace.stdout"
+    
+    - name: Create staging namespace
+      command: k3s kubectl create namespace staging
+      register: create_staging_namespace
+      failed_when: false
+      changed_when: "'created' in create_staging_namespace.stdout"
+    
+    - name: Create production namespace
+      command: k3s kubectl create namespace production
+      register: create_prod_namespace
+      failed_when: false
+      changed_when: "'created' in create_prod_namespace.stdout"
+    
+    - name: Display message about platform deployment
+      debug:
+        msg: |
+          ✅ Platform setup complete!
+          
+          Namespaces created:
+          - platform (for Harbor, ArgoCD, Monitoring)
+          - dev, staging, production (for applications)
+          
+          Next steps:
+          1. Deploy Harbor: helm install harbor harbor/harbor -n platform -f configs/harbor/values-local.yaml
+          2. Deploy ArgoCD: helm install argocd argo/argo-cd -n platform -f configs/argocd/values-local.yaml
+          3. Deploy Prometheus: helm install prometheus prometheus-community/kube-prometheus-stack -n platform
+          
+          For detailed deployment instructions, see: docs/operations/installation.md
