@@ -285,6 +285,147 @@
       when: argocd_check.rc != 0 or argocd_ns_check.rc != 0
 
     # ============================================================
+    # 部署 GitLab Runner (CI/CD 执行器)
+    # ============================================================
+    - name: Check if GitLab Runner namespace exists
+      command: k3s kubectl get namespace {{ gitlab_runner_namespace }}
+      register: gitlab_runner_ns_check
+      failed_when: false
+      changed_when: false
+    
+    - name: Check if GitLab Runner is already installed
+      shell: helm list -n {{ gitlab_runner_namespace }} | grep gitlab-runner
+      register: gitlab_runner_check
+      failed_when: false
+      changed_when: false
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      when: gitlab_runner_ns_check.rc == 0
+    
+    - name: Add GitLab Helm repository
+      command: helm repo add gitlab https://charts.gitlab.io
+      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      register: gitlab_repo
+      changed_when: "'has been added' in gitlab_repo.stdout"
+      failed_when: false
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+    
+    - name: Update Helm repositories for GitLab Runner
+      command: helm repo update
+      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      changed_when: true
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+    
+    - name: Create GitLab Runner values file
+      copy:
+        dest: /tmp/gitlab-runner-values.yaml
+        content: |
+          gitlabUrl: {{ gitlab_url }}
+          runnerRegistrationToken: {{ gitlab_runner_token }}
+          
+          runners:
+            config: |
+              [[runners]]
+                [runners.kubernetes]
+                  namespace = "{{ gitlab_runner_namespace }}"
+                  image = "ubuntu:20.04"
+                  privileged = true
+                  cpu_request = "100m"
+                  memory_request = "128Mi"
+                  cpu_limit = "1"
+                  memory_limit = "512Mi"
+                [[runners.kubernetes.volumes.empty_dir]]
+                  name = "docker-certs"
+                  mount_path = "/certs/client"
+                  medium = "Memory"
+          
+          rbac:
+            create: true
+          
+          resources:
+            limits:
+              memory: 256Mi
+              cpu: 200m
+            requests:
+              memory: 128Mi
+              cpu: 100m
+          
+          concurrent: 10
+          checkInterval: 30
+      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+    
+    - name: Deploy GitLab Runner with Helm
+      command: >
+        helm install gitlab-runner gitlab/gitlab-runner
+        --namespace {{ gitlab_runner_namespace }}
+        --create-namespace
+        --version {{ gitlab_runner_chart_version }}
+        -f /tmp/gitlab-runner-values.yaml
+        --wait
+        --timeout 10m
+      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      register: gitlab_runner_deploy
+      changed_when: gitlab_runner_deploy.rc == 0
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+    
+    - name: Wait for GitLab Runner pod to be ready
+      command: >
+        k3s kubectl wait --for=condition=ready pod
+        -l app=gitlab-runner
+        -n {{ gitlab_runner_namespace }}
+        --timeout=300s
+      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+      register: gitlab_runner_wait
+      changed_when: false
+    
+    - name: Get GitLab Runner pod status
+      command: k3s kubectl get pods -n {{ gitlab_runner_namespace }}
+      register: gitlab_runner_pods
+      changed_when: false
+      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+    
+    - name: Get GitLab Runner logs (first 50 lines)
+      command: >
+        k3s kubectl logs -n {{ gitlab_runner_namespace }}
+        -l app=gitlab-runner
+        --tail=50
+      register: gitlab_runner_logs
+      changed_when: false
+      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+    
+    - name: Display GitLab Runner deployment information
+      debug:
+        msg: |
+          ✅ GitLab Runner deployed successfully!
+          
+          📋 GitLab Runner Pods:
+          {{ gitlab_runner_pods.stdout }}
+          
+          📊 Configuration:
+          - GitLab URL: {{ gitlab_url }}
+          - Namespace: {{ gitlab_runner_namespace }}
+          - Executor: Kubernetes
+          - Concurrent jobs: 10
+          - Privileged mode: Enabled (for Docker-in-Docker)
+          
+          📝 Recent logs:
+          {{ gitlab_runner_logs.stdout_lines[-10:] | join('\n') }}
+          
+          ⚠️  Next Steps:
+          1. Verify runner appears in GitLab: Settings > CI/CD > Runners
+          2. Runner should show as "online" with green indicator
+          3. Test with a simple .gitlab-ci.yml pipeline
+          
+          💡 Troubleshooting:
+          - Check logs: kubectl logs -n {{ gitlab_runner_namespace }} -l app=gitlab-runner
+          - Check token: Ensure gitlab_runner_token is correct in group_vars/all.yml
+          - Network: Ensure runner can reach {{ gitlab_url }}
+      when: gitlab_runner_check.rc != 0 or gitlab_runner_ns_check.rc != 0
+
+    # ============================================================
     # 最终验证和总结
     # ============================================================
     - name: Get all pods in platform namespace
@@ -302,6 +443,12 @@
       register: argocd_pods
       changed_when: false
     
+    - name: Get all pods in GitLab Runner namespace
+      command: k3s kubectl get pods -n {{ gitlab_runner_namespace }}
+      register: gitlab_runner_final_pods
+      failed_when: false
+      changed_when: false
+    
     - name: Get cluster node IPs
       shell: k3s kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}'
       register: node_ips
@@ -317,7 +464,8 @@
           📦 Deployed Services:
           ├─ Cert-Manager: Certificate management ({{ platform_namespace }} namespace)
           ├─ Harbor: Container registry ({{ platform_namespace }} namespace)
-          └─ ArgoCD: GitOps continuous delivery ({{ argocd_namespace }} namespace, {{ argocd_install_method }} method)
+          ├─ ArgoCD: GitOps continuous delivery ({{ argocd_namespace }} namespace, {{ argocd_install_method }} method)
+          └─ GitLab Runner: CI/CD executor ({{ gitlab_runner_namespace }} namespace)
           
           🌐 Access URLs (use any node IP: {{ node_ips.stdout }}):
           ├─ Harbor:     http://<node-ip>:{{ harbor_http_nodeport }}
@@ -331,13 +479,18 @@
           📋 ArgoCD Pods ({{ argocd_namespace }} namespace):
           {{ argocd_pods.stdout }}
           
+          📋 GitLab Runner Pods ({{ gitlab_runner_namespace }} namespace):
+          {{ gitlab_runner_final_pods.stdout | default('Not deployed or check failed') }}
+          
           🔗 Platform Services:
           {{ all_services.stdout }}
           
           ✅ Next Steps:
-          1. Access Harbor and create a project
-          2. Configure Docker to use Harbor as registry
-          3. Deploy your first application using ArgoCD
+          1. Verify GitLab Runner is online in GitLab UI (Settings > CI/CD > Runners)
+          2. Access Harbor and create a project for your images
+          3. Configure Docker to use Harbor as registry
+          4. Create a test .gitlab-ci.yml and trigger a pipeline
+          5. Deploy your first application using ArgoCD
           
           💡 Installation Method: {{ argocd_install_method }}
              To change: Edit 'argocd_install_method' in playbook vars
